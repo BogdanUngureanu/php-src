@@ -944,6 +944,24 @@ ZEND_API zend_bool zend_value_instanceof_static(zval *zv) {
 	return instanceof_function(Z_OBJCE_P(zv), called_scope);
 }
 
+static zend_always_inline zend_bool zend_check_literal_type(zend_type *type, zval *arg, zend_bool is_return_type, zend_bool is_internal)
+{
+    zval *val = ZEND_TYPE_LT(*type);
+
+    if (Z_TYPE_P(val) == Z_TYPE_P(arg) && zend_is_identical(val, arg)) {
+        return 1;
+    }
+    zval tmp;
+    ZVAL_COPY(&tmp, arg);
+    zend_bool check = zend_verify_scalar_type_hint(((1u << Z_TYPE_P(val))), arg,
+                                                   is_return_type ? ZEND_RET_USES_STRICT_TYPES() : ZEND_ARG_USES_STRICT_TYPES(),
+                                                   is_internal);
+    if (ZEND_TYPE_IS_LT(*type) && check && zend_is_identical(ZEND_TYPE_LT(*type), arg)) {
+        return 1;
+    }
+
+    return 0;
+}
 
 static zend_always_inline zend_bool zend_check_type_slow(
 		zend_type type, zval *arg, zend_reference *ref, void **cache_slot, zend_class_entry *scope,
@@ -955,6 +973,9 @@ static zend_always_inline zend_bool zend_check_type_slow(
 		if (ZEND_TYPE_HAS_LIST(type)) {
 			zend_type *list_type;
 			ZEND_TYPE_LIST_FOREACH(ZEND_TYPE_LIST(type), list_type) {
+			    if (ZEND_TYPE_IS_LT(*list_type)) {
+                    continue;
+			    }
 				if (*cache_slot) {
 					ce = *cache_slot;
 				} else {
@@ -987,6 +1008,19 @@ static zend_always_inline zend_bool zend_check_type_slow(
 		}
 	}
 
+    if (ZEND_TYPE_HAS_LIST(type)) {
+        zend_type *list_type;
+        ZEND_TYPE_LIST_FOREACH(ZEND_TYPE_LIST(type), list_type) {
+            if (ZEND_TYPE_IS_LT(*list_type) && zend_check_literal_type(list_type, arg, is_return_type, is_internal)) {
+                return 1;
+            }
+        } ZEND_TYPE_LIST_FOREACH_END();
+    } else {
+        if (ZEND_TYPE_IS_LT(type) && zend_check_literal_type(&type, arg, is_return_type, is_internal)) {
+            return 1;
+         }
+    }
+
 builtin_types:
 	type_mask = ZEND_TYPE_FULL_MASK(type);
 	if ((type_mask & MAY_BE_CALLABLE) && zend_is_callable(arg, 0, NULL)) {
@@ -1009,10 +1043,13 @@ builtin_types:
 		return 0;
 	}
 
-	return zend_verify_scalar_type_hint(type_mask, arg,
+	zend_bool check = zend_verify_scalar_type_hint(type_mask, arg,
 		is_return_type ? ZEND_RET_USES_STRICT_TYPES() : ZEND_ARG_USES_STRICT_TYPES(),
 		is_internal);
 
+
+
+	return check;
 	/* Special handling for IS_VOID is not necessary (for return types),
 	 * because this case is already checked at compile-time. */
 }
@@ -3074,7 +3111,7 @@ static zend_always_inline int i_zend_verify_type_assignable_zval(
 	}
 
 	/* Does not contain any type to which a coercion is possible */
-	if (!(type_mask & (MAY_BE_LONG|MAY_BE_DOUBLE|MAY_BE_STRING))
+	if (!(type_mask & (MAY_BE_LONG|MAY_BE_DOUBLE|MAY_BE_STRING | _ZEND_TYPE_LITERAL_BIT))
 			&& (type_mask & MAY_BE_BOOL) != MAY_BE_BOOL) {
 		return 0;
 	}

@@ -140,6 +140,7 @@ typedef struct {
 
 #define _ZEND_TYPE_EXTRA_FLAGS_SHIFT 24
 #define _ZEND_TYPE_MASK ((1u << 24) - 1)
+
 /* Only one of these bits may be set. */
 #define _ZEND_TYPE_NAME_BIT (1u << 23)
 #define _ZEND_TYPE_CE_BIT   (1u << 22)
@@ -147,8 +148,10 @@ typedef struct {
 #define _ZEND_TYPE_KIND_MASK (_ZEND_TYPE_LIST_BIT|_ZEND_TYPE_CE_BIT|_ZEND_TYPE_NAME_BIT)
 /* Whether the type list is arena allocated */
 #define _ZEND_TYPE_ARENA_BIT (1u << 20)
+#define _ZEND_TYPE_LITERAL_BIT (1u <<  19)
+
 /* Type mask excluding the flags above. */
-#define _ZEND_TYPE_MAY_BE_MASK ((1u << 20) - 1)
+#define _ZEND_TYPE_MAY_BE_MASK ((1u << 19) - 1)
 /* Must have same value as MAY_BE_NULL */
 #define _ZEND_TYPE_NULLABLE_BIT 0x2
 
@@ -176,6 +179,10 @@ typedef struct {
 #define ZEND_TYPE_NAME(t) \
 	((zend_string *) (t).ptr)
 
+
+#define ZEND_TYPE_Lt_NAME(t) \
+	((zend_string *) (t).ptr.ast.kind)
+
 #define ZEND_TYPE_LITERAL_NAME(t) \
 	((const char *) (t).ptr)
 
@@ -187,6 +194,12 @@ typedef struct {
 
 #define ZEND_TYPE_LIST_SIZE(num_types) \
 	(sizeof(zend_type_list) + ((num_types) - 1) * sizeof(zend_type))
+
+#define ZEND_TYPE_IS_LT(t) \
+	((((t).type_mask) & _ZEND_TYPE_LITERAL_BIT) != 0)
+
+#define ZEND_TYPE_LT(t) \
+	((zval *) (t).ptr)
 
 /* This iterates over a zend_type_list. */
 #define ZEND_TYPE_LIST_FOREACH(list, type_ptr) do { \
@@ -281,6 +294,9 @@ typedef struct {
 
 #define ZEND_TYPE_INIT_CLASS_CONST_MASK(class_name, type_mask) \
 	ZEND_TYPE_INIT_PTR_MASK(class_name, _ZEND_TYPE_NAME_BIT | (type_mask))
+
+#define ZEND_TYPE_INIT_LITERAL_CODE(literal, allow_null, extra_flags) \
+    ZEND_TYPE_INIT_PTR(literal, _ZEND_TYPE_LITERAL_BIT, allow_null, extra_flags);
 
 typedef union _zend_value {
 	zend_long         lval;				/* long value */
@@ -538,6 +554,7 @@ struct _zend_ast_ref {
 #define IS_VOID						14
 #define IS_STATIC					15
 #define IS_MIXED					16
+#define IS_LITERAL                  17
 
 /* internal types */
 #define IS_INDIRECT             	12

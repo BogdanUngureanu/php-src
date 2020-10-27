@@ -264,7 +264,7 @@ static YYSIZE_T zend_yytnamerr(char*, const char*);
 %type <ast> array_pair non_empty_array_pair_list array_pair_list possible_array_pair
 %type <ast> isset_variable type return_type type_expr type_without_static
 %type <ast> identifier type_expr_without_static union_type_without_static
-%type <ast> inline_function union_type
+%type <ast> inline_function union_type literal_type
 %type <ast> attributed_statement attributed_class_statement attributed_parameter
 %type <ast> attribute_decl attribute attributes attribute_group namespace_declaration_name
 %type <ast> match match_arm_list non_empty_match_arm_list match_arm match_arm_cond_list
@@ -773,6 +773,12 @@ union_type:
 	|	union_type '|' type { $$ = zend_ast_list_add($1, $3); }
 ;
 
+literal_type:
+	 	T_LNUMBER			{ $$ = $1; }
+	 |	T_CONSTANT_ENCAPSED_STRING	{ $$ = $1; }
+	 |	T_DNUMBER			{ $$ = $1; }
+;
+
 /* Duplicate the type rules without "static",
  * to avoid conflicts with "static" modifier for properties. */
 
@@ -786,6 +792,7 @@ type_without_static:
 		T_ARRAY		{ $$ = zend_ast_create_ex(ZEND_AST_TYPE, IS_ARRAY); }
 	|	T_CALLABLE	{ $$ = zend_ast_create_ex(ZEND_AST_TYPE, IS_CALLABLE); }
 	|	name		{ $$ = $1; }
+	|	literal_type	{ $$ = zend_ast_create_ex(ZEND_AST_TYPE_LITERAL, IS_LITERAL, $1); }
 ;
 
 union_type_without_static:

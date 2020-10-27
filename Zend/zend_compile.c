@@ -226,6 +226,7 @@ static const builtin_type_info builtin_types[] = {
 	{ZEND_STRL("iterable"), IS_ITERABLE},
 	{ZEND_STRL("object"), IS_OBJECT},
 	{ZEND_STRL("mixed"), IS_MIXED},
+    {ZEND_STRL("literal"), IS_LITERAL},
 	{NULL, 0, IS_UNDEF}
 };
 
@@ -1171,6 +1172,8 @@ zend_string *zend_type_to_string_resolved(zend_type type, zend_class_entry *scop
 		ZEND_TYPE_LIST_FOREACH(ZEND_TYPE_LIST(type), list_type) {
 			if (ZEND_TYPE_HAS_CE(*list_type)) {
 				str = add_type_string(str, ZEND_TYPE_CE(*list_type)->name);
+			} else if (ZEND_TYPE_IS_LT(*list_type)) {
+               str = add_type_string(str, zval_get_string(ZEND_TYPE_LT(*list_type)));
 			} else {
 				str = add_type_string(str, resolve_class_name(ZEND_TYPE_NAME(*list_type), scope));
 			}
@@ -1179,7 +1182,10 @@ zend_string *zend_type_to_string_resolved(zend_type type, zend_class_entry *scop
 		str = zend_string_copy(resolve_class_name(ZEND_TYPE_NAME(type), scope));
 	} else if (ZEND_TYPE_HAS_CE(type)) {
 		str = zend_string_copy(ZEND_TYPE_CE(type)->name);
-	}
+	} else 	if (ZEND_TYPE_IS_LT(type)) {
+       //str = add_type_string(str, zend_string_init("ff", 2, scope));
+	   str = add_type_string(str, zval_get_string(ZEND_TYPE_LT(type)));
+    }
 
 	uint32_t type_mask = ZEND_TYPE_PURE_MASK(type);
 
@@ -5993,6 +5999,8 @@ static zend_type zend_compile_single_typename(zend_ast *ast)
 				"Cannot use \"static\" when no class scope is active");
 		}
 		return (zend_type) ZEND_TYPE_INIT_CODE(ast->attr, 0, 0);
+    } else if (ast->kind == ZEND_AST_TYPE_LITERAL) {
+        return (zend_type) ZEND_TYPE_INIT_LITERAL_CODE(zend_ast_get_zval(ast->child[0]), 0, 0);
 	} else {
 		zend_string *class_name = zend_ast_get_str(ast);
 		zend_uchar type_code = zend_lookup_builtin_type_by_name(class_name);
@@ -6076,7 +6084,7 @@ static zend_type zend_compile_typename(
 			}
 
 			uint32_t type_mask_overlap = ZEND_TYPE_PURE_MASK(type) & single_type_mask;
-			if (type_mask_overlap) {
+			if (type_mask_overlap && !ZEND_TYPE_IS_LT(single_type)) {
 				zend_type overlap_type = ZEND_TYPE_INIT_MASK(type_mask_overlap);
 				zend_string *overlap_type_str = zend_type_to_string(overlap_type);
 				zend_error_noreturn(E_COMPILE_ERROR,
@@ -6085,12 +6093,15 @@ static zend_type zend_compile_typename(
 			ZEND_TYPE_FULL_MASK(type) |= ZEND_TYPE_PURE_MASK(single_type);
 			ZEND_TYPE_FULL_MASK(single_type) &= ~_ZEND_TYPE_MAY_BE_MASK;
 
-			if (ZEND_TYPE_HAS_CLASS(single_type)) {
-				if (!ZEND_TYPE_HAS_CLASS(type)) {
-					/* The first class type can be stored directly as the type ptr payload. */
-					ZEND_TYPE_SET_PTR(type, ZEND_TYPE_NAME(single_type));
-					ZEND_TYPE_FULL_MASK(type) |= _ZEND_TYPE_NAME_BIT;
-				} else {
+			if (ZEND_TYPE_HAS_CLASS(single_type) || ZEND_TYPE_IS_LT(single_type)) {
+                if (!ZEND_TYPE_HAS_CLASS(type) && ZEND_TYPE_HAS_CLASS(single_type)) {
+                    /* The first class type can be stored directly as the type ptr payload. */
+                    ZEND_TYPE_SET_PTR(type, ZEND_TYPE_NAME(single_type));
+                    ZEND_TYPE_FULL_MASK(type) |= _ZEND_TYPE_NAME_BIT;
+                } else if (!ZEND_TYPE_IS_LT(type) && ZEND_TYPE_IS_LT(single_type)) {
+                    ZEND_TYPE_SET_PTR(type, ZEND_TYPE_LT(single_type));
+                    ZEND_TYPE_FULL_MASK(type) |= _ZEND_TYPE_LITERAL_BIT;
+                } else {
 					zend_type_list *list;
 					if (ZEND_TYPE_HAS_LIST(type)) {
 						/* Add name to existing name list. */
@@ -6195,6 +6206,15 @@ static zend_bool zend_is_valid_default_value(zend_type type, zval *value)
 	}
 	if ((ZEND_TYPE_FULL_MASK(type) & MAY_BE_ITERABLE) && Z_TYPE_P(value) == IS_ARRAY) {
 		return 1;
+	}
+
+	if (ZEND_TYPE_IS_LT(type)) {
+        zend_type *list_type;
+        ZEND_TYPE_LIST_FOREACH(ZEND_TYPE_LIST(type), list_type) {
+            if (ZEND_TYPE_IS_LT(*list_type) && zend_is_identical(ZEND_TYPE_LT(*list_type), value)) {
+                return 1;
+            }
+        } ZEND_TYPE_LIST_FOREACH_END();
 	}
 	return 0;
 }
